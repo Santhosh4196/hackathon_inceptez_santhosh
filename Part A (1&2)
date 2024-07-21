@@ -1,0 +1,371 @@
+from pyspark.sql.session import SparkSession
+from pyspark.sql.types import StructType, StructField, IntegerType, DateType, StringType
+from pyspark.sql.functions import to_date, col, trim,concat,current_date, current_timestamp
+
+
+spark=SparkSession.builder.master("local[*]").appName("WE43 Hackathon Part A").enableHiveSupport().getOrCreate()
+sc=spark.sparkContext
+
+print("Part A - Spark DF & SQL")
+print("1.	DataFrames operations  ")
+
+#1)
+insuranceinfo1_cust_schema = StructType([
+    StructField("IssuerId", IntegerType()),
+    StructField("IssuerId2", IntegerType()),
+    StructField("BusinessDate", DateType()),
+    StructField("StateCode", StringType()),
+    StructField("SourceName", StringType()),
+    StructField("NetworkName", StringType()),
+    StructField("NetworkURL", StringType()),
+    StructField("custnum", StringType()),
+    StructField("MarketCoverage", StringType()),
+    StructField("DentalOnlyPlan", StringType())
+])
+print("1.A. ",insuranceinfo1_cust_schema)
+insuranceinfo2_cust_schema_1 = StructType([
+    StructField("IssuerId", IntegerType()),
+    StructField("IssuerId2", IntegerType()),
+    StructField("BusinessDate", StringType()),
+    StructField("StateCode", StringType()),
+    StructField("SourceName", StringType()),
+    StructField("NetworkName", StringType()),
+    StructField("NetworkURL", StringType()),
+    StructField("custnum", StringType()),
+    StructField("MarketCoverage", StringType()),
+    StructField("DentalOnlyPlan", StringType())
+])
+print("1.B. ",insuranceinfo2_cust_schema_1)
+insuranceinfo2_cust_schema_2 = StructType([
+    StructField("IssuerId", IntegerType()),
+    StructField("IssuerId2", IntegerType()),
+    StructField("BusinessDate", StringType()),
+    StructField("StateCode", StringType()),
+    StructField("SourceName", StringType()),
+    StructField("NetworkName", StringType()),
+    StructField("NetworkURL", StringType()),
+    StructField("custnum", StringType()),
+    StructField("MarketCoverage", StringType()),
+    StructField("DentalOnlyPlan", StringType()),
+    StructField("RejectRows", StringType())
+])
+print("1.C. ",insuranceinfo2_cust_schema_2)
+
+
+
+#2)
+df1=spark.read.csv("file:///home/hduser/sparkhack2/insuranceinfo1.csv",schema=insuranceinfo1_cust_schema,header=True,mode="dropmalformed")
+#df1.printSchema()
+print("2.")
+print("DF with insuranceinfo1.csv ")
+df1.show(5)
+
+df2=spark.read.csv("file:///home/hduser/sparkhack2/insuranceinfo2.csv",schema=insuranceinfo2_cust_schema_1,header=True,mode="dropmalformed")
+df2 = df2.withColumn("BusinessDate", to_date(df2["BusinessDate"], "dd-MM-yyyy"))
+print("DF with insuranceinfo2.csv  ")
+df2.show(5)
+
+#df3_with_corrupt=spark.read.csv("file:///home/hduser/sparkhack2/insuranceinfo2.csv",schema=insuranceinfo2_cust_schema_2,header=True,mode="permissive",columnNameOfCorruptRecord="RejectRows",ignoreLeadingWhiteSpace=True,ignoreTrailingWhiteSpace=True)
+df3_with_corrupt = (spark.read
+                    .format("csv")
+                    .option("header", "true")
+                    .option("mode", "permissive")
+                    .option("columnNameOfCorruptRecord", "RejectRows")
+                    .option("ignoreLeadingWhiteSpace", "true")
+                    .option("ignoreTrailingWhiteSpace", "true")
+                    .schema(insuranceinfo2_cust_schema_2)
+                    .load("file:///home/hduser/sparkhack2/insuranceinfo2.csv"))
+
+#df3_with_corrupt.printSchema()
+df3_with_corrupt.cache()
+corrupt_df=df3_with_corrupt.where("RejectRows is not null")
+#df3_with_corrupt.select('RejectRows').show()
+print("df3_with_corrupt with insuranceinfo2.csv with reject rows ")
+df3_with_corrupt.show(5)
+#corrupt_df.write.option("header", "true").csv("file:///home/hduser/sparkhack2/insuranceinfo2_rejected_records1.csv")
+
+
+
+
+#3)
+
+merged_df = df1.union(df2)
+#print(df1.count(),df2.count(),merged_df.count())
+
+#3.a Rename Column
+merged_df=merged_df.withColumnRenamed("StateCode","stcd").withColumnRenamed("SourceName","srcnm")
+print("3.a.merged_df with colums renamed : StateCode and SourceName as stcd and srcnm ")
+merged_df.show(5)
+#3.b Concat Column
+merged_df=merged_df.withColumn("issueridcomposite",concat(col("IssuerId").cast(StringType()), col("IssuerId2").cast(StringType())))
+print("3.b.merged_df with Concat IssuerId,IssuerId2 as issueridcomposite and make it as a new field  ")
+merged_df.show(5)
+#3.c remove Column
+merged_df=merged_df.drop("DentalOnlyPlan")
+print("3.c.merged_df with Remove DentalOnlyPlan column")
+merged_df.show(5)
+#3.D add columns
+merged_df = merged_df.withColumn("sysdt", current_date())
+merged_df = merged_df.withColumn("systs", current_timestamp())
+print("3.d.merged_df with added columns : sys date and timestamp")
+merged_df.show(5)
+
+#interesting usecases
+#i.
+merged_df_collist=merged_df.columns
+print("i.All the column names and store in an List variable ")
+print(merged_df_collist)
+#print(merged_df_collist)
+#ii.
+merged_df_dtypelist=merged_df.dtypes
+print("ii.all columns with datatype and store in a list variable ")
+print(merged_df_dtypelist)
+#iii.
+integer_columns = [col_name for col_name, dtype in merged_df_dtypelist if dtype == 'int']
+print("iii.all integer columns alone and store in an list  ")
+print(integer_columns)
+#iv.
+df_integer = merged_df.select(integer_columns)
+print("iii.iv.	Select only the integer columns and display 10 records  ")
+df_integer.show(10)
+#v.
+columns_df1 = set(df1.columns)
+columns_df3 = set(df3_with_corrupt.columns)
+additional_columns = columns_df3 - columns_df1
+print("v.additional column in the reject dataframe subtracting the columns between df1 and df3 ")
+#print(additional_columns)
+
+
+
+#4)
+merged_df_cleaned = merged_df.dropna()
+clean_row_count = merged_df_cleaned.count()
+print("4.Remove the rows contains null in any one of the field",'\n'," and count the number of rows which contains all columns with some value")
+print("Number of rows with no null values:", clean_row_count)
+
+
+#5&6
+
+from pyspark.sql.functions import udf
+from org.inceptez.hack.allmethods import remspecialchar
+
+remspecialchar_udf = udf(remspecialchar, StringType())
+
+data = [
+    (1, "Pathway - 2X (with dental)"),
+    (2, "Pathway @ 4X [with braces]"),
+    (3, "Pathway - 5X (with check-up)"),
+]
+schema = ["id", "string"]
+df = spark.createDataFrame(data, schema)
+df_with_cleaned_str = df.withColumn("cleaned_string", remspecialchar_udf(df["string"]))
+print("5 and 6. Custom method creation in package and import package for cleaning string using regexp")
+df_with_cleaned_str.show(truncate=False)
+
+#7.
+df1_with_cleaned_networkname=df1.withColumn("Cleaned_NetworkName",remspecialchar_udf(df1["NetworkName"]))
+print("7.Using imported custom package to clean Network Name column in DF" )
+df1_with_cleaned_networkname.select('NetworkName','Cleaned_NetworkName').\
+    where("NetworkName like '%(%' ")\
+    .show(10,truncate=False)
+#8.
+#df1_with_cleaned_networkname.write.mode('overwrite').json("file:///home/hduser/sparkhack2/df1_with_cleaned_networkname.json")
+print("8. JSON of df1_with_cleaned_networkname stored in home/hduser/sparkhack2/df1_with_cleaned_networkname.json")
+#9.
+#df1_with_cleaned_networkname.write.option("header", "true").option("delimiter", "~").mode("overwrite").csv("file:///home/hduser/sparkhack2/df1_with_cleaned_networkname.csv")
+print("8. CSV of df1_with_cleaned_networkname stored in home/hduser/sparkhack2/df1_with_cleaned_networkname.json")
+#9.Note
+def writeToFile(sparkSession, df, fileType, location, delimiter=None, mode='overwrite'):
+
+    if fileType == 'json':
+        df.write.mode(mode).json(location)
+    elif fileType == 'csv':
+        df.write.option("header", "true") \
+            .option("delimiter", delimiter) \
+            .mode(mode) \
+            .csv(location)
+    else:
+        raise ValueError(f"Unsupported file type: {fileType}")
+
+writeToFile(spark, df1_with_cleaned_networkname, 'json', 'file:///home/hduser/sparkhack2/json/')
+
+# Save the DataFrame in CSV format with a custom delimiter
+writeToFile(spark, df1_with_cleaned_networkname, 'csv', 'file:///home/hduser/sparkhack2/csv/', delimiter='~')
+
+#10.
+print("10.Write DF to Hive table")
+df1_with_cleaned_networkname.write.mode("overwrite").saveAsTable("default.df1_with_cleaned_networkname")
+
+#2)
+print("2.	Tale of handling RDDs, DFs and TempViews  ")
+print("Use RDD functions:")
+#11
+rdd1=sc.textFile("file:///home/hduser/sparkhack2/custs_states.csv")
+print("11.Load the file3 (custs_states.csv) from the HDFS location using RDD")
+print(rdd1.collect())
+#12
+split_rdd = rdd1.map(lambda line: line.split(","))
+custfilter = split_rdd.filter(lambda x: len(x) == 5)
+statesfilter = split_rdd.filter(lambda x: len(x) == 2)
+print("12.Split the above data into 2 RDDs")
+print("12.custfilter with 5 columns data")
+#print(custfilter.collect())
+print("12.statesfilter with 2 columns data")
+#print(statesfilter.collect())
+
+
+print("Use DSL functions:")
+#13
+custstatesdf = spark.read.csv("file:///home/hduser/sparkhack2/custs_states.csv", header=False, inferSchema=True)
+print("13.Load the file3 (custs_states.csv) from the HDFS location using DSL")
+custstatesdf.show()
+#14
+custfilterdf = custstatesdf.filter(
+    custstatesdf["_c2"].isNotNull() & custstatesdf["_c3"].isNotNull() & custstatesdf["_c4"].isNotNull()
+).selectExpr(
+    "_c0 as custid", "_c1 as firstname", "_c2 as lastname", "_c3 as age", "_c4 as profession"
+)
+
+statesfilterdf = custstatesdf.filter(
+    custstatesdf["_c2"].isNull() & custstatesdf["_c3"].isNull() & custstatesdf["_c4"].isNull()
+).selectExpr(
+    "_c0 as stated", "_c1 as state_description"
+)
+print("13.Split the above data into 2 DFs")
+print("Customer Master Info (5 columns):")
+custfilterdf.show(truncate=False)
+print("State Description (2 columns):")
+statesfilterdf.show(truncate=False)
+
+#15
+
+custfilterdf.createOrReplaceTempView("custview")
+print("15.custfilterdf stored in temp view custview")
+statesfilterdf.createOrReplaceTempView("statesview")
+print("15.statesfilterdf stored in temp view statesview")
+#16
+merged_df.createOrReplaceTempView("insureview")
+print("16.merged_df stored in temp view insureview")
+#17
+from pyspark.sql.functions import udf
+from org.inceptez.hack.allmethods import remspecialchar
+spark.udf.register("remspecialchar_udf", remspecialchar_udf)
+print("17. spark.udf.register('remspecialchar_udf', remspecialchar_udf) ")
+
+#18
+spark.conf.set("spark.sql.shuffle.partitions", "4")
+
+#a.
+query = """
+SELECT 
+    NetworkName, 
+    remspecialchar_udf(NetworkName) AS cleannetworkname,
+    current_date() AS curdt,
+    current_timestamp() AS curts,
+    year(businessdate) AS yr,
+    month(businessdate) AS mth,
+    case when NetworkURL like 'http://%' then "http non secured"
+    when NetworkURL like 'https://%' then "https secured"
+    else "noprotocol"
+    end as protocol
+FROM  insureview where NetworkName like '%(%' 
+"""
+
+# Run the SQL query
+insureview_df = spark.sql(query)
+print("18.a Pass NetworkName to remspecialcharudf and get the new column called cleannetworkname")
+print("18.b Add current date, current timestamp fields as curdt and curts")
+print("18.c year and month from the businessdate into two columns yr,mth ")
+print("18.d NetworkURl secured/non secured/no protocol")
+insureview_df.show(10)
+
+print("18.e Join insureview,custview,stateview and output required columns")
+join_query = """
+SELECT 
+    a.*, 
+    remspecialchar_udf(NetworkName) AS cleannetworkname,
+    current_date() AS curdt,
+    current_timestamp() AS curts,
+    year(businessdate) AS yr,
+    month(businessdate) AS mth,
+    case when NetworkURL like 'http://%' then "http non secured"
+    when NetworkURL like 'https://%' then "https secured"
+    else "noprotocol"
+    end as protocol,
+    age,profession,state_description
+FROM  insureview a inner join statesview b on a.stcd=b.stated inner join custview c on c.custid=a.custnum where NetworkName like '%(%' 
+"""
+
+insureview_cust_state_join_df=spark.sql(join_query)
+insureview_cust_state_join_df.show()
+
+#19
+print("19. stored above join df in a single parquet file in HDFS in home/hduser/sparkhack2/insureview_cust_state_join_df")
+insureview_cust_state_join_df.coalesce(1).write.mode("overwrite").parquet("file:///home/hduser/sparkhack2/insureview_cust_state_join_df")
+
+#20
+print("20. Display second highest profession counts done in each state and partitioned by protocol")
+insureview_cust_state_join_df.createOrReplaceTempView("insureview_cust_state_join_df")
+# Combined SQL query
+cte_query = """
+WITH aggregated AS (
+    SELECT
+        state_description,
+        protocol,
+        profession,
+        AVG(age) AS avgage,
+        COUNT(*) AS profession_count
+    FROM
+        insureview_cust_state_join_df
+    GROUP BY
+        state_description,
+        protocol,
+        profession
+),
+ranked AS (
+    SELECT
+        state_description,
+        protocol,
+        profession,
+        avgage,
+        profession_count,
+        ROW_NUMBER() OVER (PARTITION BY state_description, protocol ORDER BY profession_count DESC) AS rank
+    FROM
+        aggregated
+)
+SELECT
+    ROW_NUMBER() OVER (PARTITION BY protocol ORDER BY profession_count DESC) AS seqno,
+    profession,
+    profession_count,
+    avgage as average_age,
+    state_description,
+    protocol
+    
+FROM
+    ranked
+WHERE
+    rank = 2   
+"""
+
+# Execute the combined SQL query
+profession_count_df = spark.sql(cte_query)
+
+# Show the result
+profession_count_df.show(10)
+
+#21
+
+#profession_count_df.write.jdbc(url="jdbc:mysql://127.0.0.1/hackathon",table="T_profession_count",mode="overwrite",properties={"user":"root","password":"Root123$","driver":"com.mysql.cj.jdbc.Driver","queryTimeout":"30","truncate":"true"})
+
+'''
+CREATE TABLE T_profession_count (
+  seqno int DEFAULT NULL,
+  profession varchar(255) DEFAULT NULL,
+  rofession_count int DEFAULT NULL,
+  average_age double DEFAULT NULL,
+  state_description varchar(255) DEFAULT NULL
+)'''
+
+#22
+print("22. Spark Submit command: spark-submit --driver-memory 512M --num-executors 4 --executor-memory 1G --executor-cores 2 /home/hduser/install/part_a.py")
+#spark-submit --driver-memory 512M --num-executors 4 --executor-memory 1G --executor-cores 2 /home/hduser/install/part_a.py
